@@ -1,0 +1,181 @@
+<?php
+/*
+Plugin Name: WooCommerce Buy Now Button (Blocks + Single Product)
+Plugin URI: https://github.com/yourusername/woo-buy-now-button
+Description: Adds a Buy Now button in WooCommerce Block grids, shop/archive, and single product pages. Admin settings allow editing button labels, colors, and position.
+Version: 1.6
+Author: Ainul islam
+Author URI: https://github.com/aimzworld007
+License: GPL2
+Text Domain: woo-buy-now-button
+*/
+
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+class WC_Buy_Now_Plugin {
+    public function __construct() {
+        add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_scripts' ], 20 );
+        add_action( 'woocommerce_after_add_to_cart_button', [ $this, 'maybe_add_single_product_button_below' ] );
+        add_action( 'woocommerce_before_add_to_cart_button', [ $this, 'maybe_add_single_product_button_above' ] );
+        add_action( 'admin_menu', [ $this, 'settings_menu' ] );
+        add_action( 'admin_init', [ $this, 'settings_init' ] );
+        add_filter( 'woocommerce_product_single_add_to_cart_text', [ $this, 'custom_add_to_cart_label' ] );
+        add_filter( 'woocommerce_product_add_to_cart_text', [ $this, 'custom_add_to_cart_label' ] );
+    }
+
+    public function settings_menu() {
+        add_options_page(
+            'Woo Buy Now Settings',
+            'Woo Buy Now',
+            'manage_options',
+            'woo-buy-now-settings',
+            [ $this, 'settings_page_html' ]
+        );
+    }
+
+    public function settings_init() {
+        // Colors
+        register_setting( 'woo_buy_now', 'woo_buy_now_color', [
+            'default' => '#d32f2f',
+            'sanitize_callback' => 'sanitize_hex_color'
+        ] );
+        register_setting( 'woo_buy_now', 'woo_add_to_cart_color', [
+            'default' => '#2e7d32',
+            'sanitize_callback' => 'sanitize_hex_color'
+        ] );
+
+        // Position
+        register_setting( 'woo_buy_now', 'woo_buy_now_position', [
+            'default' => 'below',
+            'sanitize_callback' => function( $v ) {
+                return in_array( $v, [ 'above', 'below' ] ) ? $v : 'below';
+            }
+        ] );
+
+        // Labels
+        register_setting( 'woo_buy_now', 'woo_buy_now_label', [
+            'default' => 'Buy Now',
+            'sanitize_callback' => 'sanitize_text_field'
+        ] );
+        register_setting( 'woo_buy_now', 'woo_add_to_cart_label', [
+            'default' => 'Add to Cart',
+            'sanitize_callback' => 'sanitize_text_field'
+        ] );
+
+        add_settings_section( 'woo_buy_now_section', 'Buy Now Settings', null, 'woo-buy-now-settings' );
+
+        add_settings_field('woo_buy_now_color','Buy Now Button Color',function(){ $color = get_option('woo_buy_now_color','#d32f2f'); echo '<input type="color" name="woo_buy_now_color" value="'.esc_attr($color).'" />';},'woo-buy-now-settings','woo_buy_now_section');
+        add_settings_field('woo_add_to_cart_color','Add to Cart Button Color',function(){ $color = get_option('woo_add_to_cart_color','#2e7d32'); echo '<input type="color" name="woo_add_to_cart_color" value="'.esc_attr($color).'" />';},'woo-buy-now-settings','woo_buy_now_section');
+        add_settings_field('woo_buy_now_position','Buy Now Position (Single Product)',function(){ $pos = get_option('woo_buy_now_position','below'); echo '<select name="woo_buy_now_position"><option value="above" '.selected($pos,'above',false).'>Above Add to Cart</option><option value="below" '.selected($pos,'below',false).'>Below Add to Cart</option></select>';},'woo-buy-now-settings','woo_buy_now_section');
+        add_settings_field('woo_buy_now_label','Buy Now Button Label',function(){ $label = get_option('woo_buy_now_label','Buy Now'); echo '<input type="text" name="woo_buy_now_label" value="'.esc_attr($label).'" />';},'woo-buy-now-settings','woo_buy_now_section');
+        add_settings_field('woo_add_to_cart_label','Add to Cart Button Label',function(){ $label = get_option('woo_add_to_cart_label','Add to Cart'); echo '<input type="text" name="woo_add_to_cart_label" value="'.esc_attr($label).'" />';},'woo-buy-now-settings','woo_buy_now_section');
+    }
+
+    public function settings_page_html() {
+        ?>
+        <div class="wrap">
+            <h1>Woo Buy Now Settings</h1>
+            <form method="post" action="options.php">
+                <?php
+                settings_fields('woo_buy_now');
+                do_settings_sections('woo-buy-now-settings');
+                submit_button();
+                ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public function maybe_add_single_product_button_above() {
+        if (get_option('woo_buy_now_position','below')==='above') $this->render_single_buy_now();
+    }
+
+    public function maybe_add_single_product_button_below() {
+        if (get_option('woo_buy_now_position','below')==='below') $this->render_single_buy_now();
+    }
+
+    private function render_single_buy_now() {
+        global $product;
+        if (!$product || !$product->is_purchasable()) return;
+        $checkout_url = wc_get_checkout_url();
+        $pid = $product->get_id();
+        $buy_color = get_option('woo_buy_now_color','#d32f2f');
+        $buy_label = get_option('woo_buy_now_label','Buy Now');
+        echo '<a href="'.esc_url(add_query_arg(['add-to-cart'=>$pid,'redirect_to'=>$checkout_url], wc_get_cart_url())).'" class="button buy-now-single" style="background:'.esc_attr($buy_color).';color:#fff;">'.esc_html($buy_label).'</a>';
+    }
+
+    public function custom_add_to_cart_label($label){ return get_option('woo_add_to_cart_label',$label); }
+
+    public function enqueue_scripts() {
+        $buy_now_color  = get_option('woo_buy_now_color','#d32f2f');
+        $add_cart_color = get_option('woo_add_to_cart_color','#2e7d32');
+        $buy_label      = get_option('woo_buy_now_label','Buy Now');
+
+        wp_register_script('wc-buy-now-block','','',false,true);
+        wp_enqueue_script('wc-buy-now-block');
+
+        wp_localize_script('wc-buy-now-block','WCBuyNow',[
+            'checkout_url'=>esc_url(wc_get_checkout_url()),
+            'ajax_add_to_cart'=>esc_url(home_url('/?wc-ajax=add_to_cart')),
+            'buy_label'=>esc_js($buy_label),
+        ]);
+
+        $inline_js = <<<JS
+(function(){
+    'use strict';
+    function initBuyNowButtons(root){
+        root = root || document;
+        var items = root.querySelectorAll('.wc-block-grid__product');
+        if(!items.length) return;
+        items.forEach(function(item){
+            if(item.querySelector('.buy-now-button')) return;
+            var addBtn = item.querySelector('a.add_to_cart_button, a.ajax_add_to_cart');
+            if(!addBtn) return;
+            var pid = addBtn.getAttribute('data-product_id');
+            if(!pid){ var href=addBtn.getAttribute('href')||''; var m=href.match(/[?&]add-to-cart=(\\d+)/); if(m) pid=m[1]; }
+            if(!pid) return;
+            var buy = document.createElement('a');
+            buy.href='#';
+            buy.className='button buy-now-button';
+            buy.setAttribute('data-product-id',pid);
+            buy.innerText=WCBuyNow.buy_label||'Buy Now';
+            addBtn.parentNode.insertBefore(buy,addBtn.nextSibling);
+            buy.addEventListener('click',function(e){
+                e.preventDefault();
+                var productId=this.getAttribute('data-product-id');
+                if(!productId){window.location.href=addBtn.href||WCBuyNow.checkout_url;return;}
+                var body='product_id='+encodeURIComponent(productId)+'&quantity=1';
+                fetch(WCBuyNow.ajax_add_to_cart,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},body:body})
+                .then(resp=>resp.json().catch(()=>false))
+                .then(data=>{if(data&&data.error){window.location.href='/?add-to-cart='+productId+'&quantity=1';return;}window.location.href=WCBuyNow.checkout_url;})
+                .catch(()=>{window.location.href='/?add-to-cart='+productId+'&quantity=1';});
+            });
+        });
+    }
+    if(document.readyState!=='loading'){initBuyNowButtons(document);} else {document.addEventListener('DOMContentLoaded',()=>initBuyNowButtons(document));}
+    new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(node){if(node.nodeType!==1)return;if(node.matches&&node.matches('.wc-block-grid__product'))initBuyNowButtons(node.parentNode);else if(node.querySelector&&node.querySelector('.wc-block-grid__product'))initBuyNowButtons(node);});});}).observe(document.body,{childList:true,subtree:true});
+})();
+JS;
+        wp_add_inline_script('wc-buy-now-block',$inline_js);
+
+        $css="
+        .wc-block-grid__product .add_to_cart_button,
+        .wc-block-grid__product .ajax_add_to_cart,
+        .wc-block-grid__product .buy-now-button,
+        .single-product .button.buy-now-single { display:inline-block;width:100%;text-align:center;padding:10px 16px;border-radius:6px;font-size:14px;line-height:1.4;margin-top:8px;box-sizing:border-box; }
+        .wc-block-grid__product .add_to_cart_button,.wc-block-grid__product .ajax_add_to_cart { background: {$add_cart_color} !important; color:#fff !important; }
+        .wc-block-grid__product .buy-now-button,.single-product .button.buy-now-single { background: {$buy_now_color} !important; color:#fff !important; }
+        @media (min-width:769px){.wc-block-grid__product .add_to_cart_button,.wc-block-grid__product .ajax_add_to_cart,.wc-block-grid__product .buy-now-button { width:auto;margin-right:8px; } }
+        .single-product form.cart { display:flex;flex-wrap:wrap;align-items:center;gap:8px; }
+        .single-product form.cart .quantity{margin:0;}
+        .single-product form.cart .button,.single-product .button.buy-now-single{flex:1 1 auto;max-width:220px;padding:10px 16px;font-size:14px;line-height:1.4;border-radius:6px;text-align:center;box-sizing:border-box;}
+        .single-product .button.buy-now-single{order:99;}
+        @media (max-width:768px){.single-product form.cart{flex-direction:column;}.single-product form.cart .button,.single-product .button.buy-now-single{width:100%;max-width:100%;}}
+        ";
+        wp_register_style('wc-buy-now-style',false);
+        wp_enqueue_style('wc-buy-now-style');
+        wp_add_inline_style('wc-buy-now-style',$css);
+    }
+}
+
+new WC_Buy_Now_Plugin();          
